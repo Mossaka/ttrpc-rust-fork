@@ -20,6 +20,7 @@ fn main() {
         "protocols/protos/health.proto",
         "protocols/protos/google/protobuf/empty.proto",
         "protocols/protos/oci.proto",
+        "protocols/protos/hello.proto",
     ];
     let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(true);
 

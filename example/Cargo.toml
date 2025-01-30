@@ -49,9 +49,22 @@ path = "./async-stream-server.rs"
 name = "async-stream-client"
 path = "./async-stream-client.rs"
 
+[[example]]
+name = "hello_server"
+path = "./hello_server.rs"
+
+[[example]]
+name = "hello_client"
+path = "./hello_client.rs"
+
 [build-dependencies]
 ttrpc-codegen = { path = "../ttrpc-codegen"}
 
 [patch.crates-io]
 ttrpc-compiler = { path = "../compiler"}
+
+[dependencies]
+opentelemetry = "0.27.1"
+opentelemetry-stdout = "0.27.0"
+opentelemetry_sdk = "0.27.1"
 
