@@ -13,6 +13,7 @@ use std::os::unix::net::UnixListener as SysUnixListener;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use opentelemetry::trace::TraceContextExt;
 
 use async_trait::async_trait;
 use futures::stream::Stream;
@@ -33,7 +34,6 @@ use tokio_vsock::VsockListener;
 
 use crate::asynchronous::{stream::SendingMessage, unix_incoming::UnixIncoming};
 use crate::common::{self, Domain};
-use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{
     check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
@@ -46,6 +46,7 @@ use crate::r#async::stream::{
 };
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
+use crate::tracing;
 
 const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -570,10 +571,12 @@ impl HandlerContext {
         let req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
 
+        let (cx, metadata) = tracing::start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
+
         let ctx = TtrpcContext {
             fd: self.fd,
             mh: req_msg.header,
-            metadata: context::from_pb(&req.metadata),
+            metadata,
             timeout_nano: req.timeout_nano,
         };
 
@@ -581,7 +584,8 @@ impl HandlerContext {
             error!("method handle {} got error {:?}", path, &e);
             get_status(Code::UNKNOWN, e)
         };
-        if req.timeout_nano == 0 {
+
+        let result = if req.timeout_nano == 0 {
             method
                 .handler(ctx, req)
                 .await
@@ -603,7 +607,10 @@ impl HandlerContext {
                 r.map_err(get_unknown_status_and_log_err)
             })
             .map(Some)
-        }
+        };
+
+        cx.span().end();
+        result
     }
 
     async fn handle_stream(
@@ -615,6 +622,8 @@ impl HandlerContext {
         let stream_id = req_msg.header.stream_id;
         let req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
+
+        let (cx, metadata) = tracing::start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
 
         let (tx, rx): (ResultSender, ResultReceiver) = channel(100);
         let stream_tx = tx.clone();
@@ -637,7 +646,7 @@ impl HandlerContext {
         let ctx = TtrpcContext {
             fd: self.fd,
             mh: req_msg.header,
-            metadata: context::from_pb(&req.metadata),
+            metadata,
             timeout_nano: req.timeout_nano,
         };
 
@@ -654,9 +663,11 @@ impl HandlerContext {
                 get_status(Code::UNKNOWN, e)
             })?;
         }
-        task.await
+        let result = task.await
             .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
-            .map_err(|e| get_status(Code::UNKNOWN, e))
+            .map_err(|e| get_status(Code::UNKNOWN, e));
+        cx.span().end();
+        result
     }
 
     async fn respond(tx: MessageSender, stream_id: u32, resp: Response) -> Result<()> {

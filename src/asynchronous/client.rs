@@ -9,6 +9,7 @@ use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use opentelemetry::trace::TraceContextExt;
 
 use async_trait::async_trait;
 use tokio::{self, sync::mpsc, task};
@@ -66,6 +67,10 @@ impl Client {
 
     /// Requsts a unary request and returns with response.
     pub async fn request(&self, req: Request) -> Result<Response> {
+        let (cx, pb_metadata) = crate::tracing::start_client_trace("rpc.client", &req.service, &req.method);
+        let mut req = req;
+        req.set_metadata(pb_metadata);
+
         let timeout_nano = req.timeout_nano;
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
@@ -99,16 +104,17 @@ impl Client {
             .ok_or_else(|| Error::RemoteClosed)?
         };
 
-        let msg = result?;
-
-        let res = Response::decode(msg.payload)
+        let buf = result?;
+        let res = Response::decode(buf.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.status();
         if status.code() != Code::OK {
+            cx.span().end();
             return Err(Error::RpcStatus((*status).clone()));
         }
 
+        cx.span().end();
         Ok(res)
     }
 
