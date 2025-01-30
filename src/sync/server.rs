@@ -26,15 +26,18 @@ use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
+#[cfg(feature = "opentelemetry")]
 use opentelemetry::trace::TraceContextExt;
 
 use super::utils::{response_error_to_channel, response_to_channel};
+
+#[cfg(not(feature = "opentelemetry"))]
+use crate::context::from_pb;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
-use crate::tracing::start_server_trace;
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -193,7 +196,14 @@ fn start_method_handler_thread(
                 continue;
             };
 
-            let (cx, pb_metadata) = start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
+            #[cfg(feature = "opentelemetry")]
+            let (cx, pb_metadata) = {
+                use crate::tracing::start_server_trace;
+                let (cx, pb_metadata) = start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
+                (cx, pb_metadata)
+            };
+            #[cfg(not(feature = "opentelemetry"))]
+            let pb_metadata = from_pb(&req.metadata);
 
             let ctx = TtrpcContext {
                 fd: connection.id(),
@@ -207,9 +217,11 @@ fn start_method_handler_thread(
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
                 quit_connection(quit, control_tx);
+                #[cfg(feature = "opentelemetry")]
                 cx.span().end();
                 break;
             }
+            #[cfg(feature = "opentelemetry")]
             cx.span().end();
         }
     });

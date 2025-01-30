@@ -54,6 +54,7 @@ mod macros;
 pub mod context;
 
 pub mod proto;
+#[cfg(feature = "opentelemetry")]
 pub mod tracing;
 
 #[doc(inline)]

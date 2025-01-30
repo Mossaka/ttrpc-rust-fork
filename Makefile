@@ -33,8 +33,17 @@ check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features -- -D warnings
 
+.PHONY: check-ttrpc
+check-ttrpc:
+	cargo fmt --all -- --check
+	cargo clippy --all-targets --all-features -- -D warnings
+	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets -F opentelemetry -- -D warnings
+	cargo clippy --all-targets -F async -- -D warnings
+	cargo clippy --all-targets -F async -F opentelemetry -- -D warnings
+
 .PHONY: check-all
 check-all:
-	$(MAKE) check
+	$(MAKE) check-ttrpc
 	$(MAKE) -C compiler check
 	$(MAKE) -C ttrpc-codegen check

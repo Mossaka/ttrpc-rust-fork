@@ -13,6 +13,7 @@ use std::os::unix::net::UnixListener as SysUnixListener;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(feature = "opentelemetry")]
 use opentelemetry::trace::TraceContextExt;
 
 use async_trait::async_trait;
@@ -46,6 +47,8 @@ use crate::r#async::stream::{
 };
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
+
+#[cfg(feature = "opentelemetry")]
 use crate::tracing;
 
 const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -571,7 +574,12 @@ impl HandlerContext {
         let req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
 
+
+        #[cfg(feature = "opentelemetry")]
         let (cx, metadata) = tracing::start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
+
+        #[cfg(not(feature = "opentelemetry"))]
+        let metadata = crate::context::from_pb(&req.metadata);
 
         let ctx = TtrpcContext {
             fd: self.fd,
@@ -609,6 +617,7 @@ impl HandlerContext {
             .map(Some)
         };
 
+        #[cfg(feature = "opentelemetry")]
         cx.span().end();
         result
     }
@@ -623,7 +632,11 @@ impl HandlerContext {
         let req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
 
+        #[cfg(feature = "opentelemetry")]
         let (cx, metadata) = tracing::start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
+
+        #[cfg(not(feature = "opentelemetry"))]
+        let metadata = crate::context::from_pb(&req.metadata);
 
         let (tx, rx): (ResultSender, ResultReceiver) = channel(100);
         let stream_tx = tx.clone();
@@ -666,6 +679,7 @@ impl HandlerContext {
         let result = task.await
             .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
             .map_err(|e| get_status(Code::UNKNOWN, e));
+        #[cfg(feature = "opentelemetry")]
         cx.span().end();
         result
     }

@@ -23,6 +23,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(feature = "opentelemetry")]
 use opentelemetry::trace::TraceContextExt;
 
 use crate::error::{Error, Result};
@@ -31,7 +32,6 @@ use crate::proto::{
 };
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::ClientConnection;
-use crate::tracing::start_client_trace;
 
 #[cfg(windows)]
 use super::sys::PipeConnection;
@@ -161,9 +161,14 @@ impl Client {
     pub fn request(&self, req: Request) -> Result<Response> {
         check_oversize(req.compute_size() as usize, false)?;
 
-        let (cx, pb_metadata) = start_client_trace("rpc.client", &req.service, &req.method);
-        let mut req = req;
-        req.set_metadata(pb_metadata);
+        #[cfg(feature = "opentelemetry")]
+        let (cx, req) = {
+            use crate::tracing::start_client_trace;
+            let (cx, pb_metadata) = start_client_trace("rpc.client", &req.service, &req.method);
+            let mut req = req;
+            req.set_metadata(pb_metadata);
+            (cx, req)
+        };
 
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
         // Notice: pure client problem can't be rpc error
@@ -192,10 +197,12 @@ impl Client {
 
         let status = res.status();
         if status.code() != Code::OK {
+            #[cfg(feature = "opentelemetry")]
             cx.span().end();
             return Err(Error::RpcStatus((*status).clone()));
         }
 
+        #[cfg(feature = "opentelemetry")]
         cx.span().end();
         Ok(res)
     }
