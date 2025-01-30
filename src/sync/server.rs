@@ -26,19 +26,15 @@ use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
+use opentelemetry::trace::TraceContextExt;
 
 use super::utils::{response_error_to_channel, response_to_channel};
-use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
-use crate::tracing;
-use opentelemetry::KeyValue;
-use opentelemetry::trace::Tracer;
-use opentelemetry::Context as OtelContext;
-use opentelemetry::trace::TraceContextExt;
+use crate::tracing::start_server_trace;
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -197,35 +193,24 @@ fn start_method_handler_thread(
                 continue;
             };
 
-            let parent_cx = tracing::extract_context(&context::from_pb(&req.metadata));
-            let tracer = opentelemetry::global::tracer("ttrpc");
-            let span = tracer.start_with_context("rpc.server", &parent_cx);
-            let cx = OtelContext::current_with_span(span);
-            
-            let span = cx.span();
-            span.set_attributes(vec![
-                KeyValue::new("rpc.system", "ttrpc"),
-                KeyValue::new("rpc.service", req.service.clone()),
-                KeyValue::new("rpc.method", req.method.clone()),
-            ]);
-            let _guard = cx.clone().attach();
+            let (cx, pb_metadata) = start_server_trace("rpc.server", &req.service, &req.method, &req.metadata);
 
             let ctx = TtrpcContext {
                 fd: connection.id(),
                 cancel_rx: cancel_rx.clone(),
                 mh,
                 res_tx: res_tx.clone(),
-                metadata: context::from_pb(&req.metadata),
+                metadata: pb_metadata,
                 timeout_nano: req.timeout_nano,
             };
 
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
                 quit_connection(quit, control_tx);
-                span.end();
+                cx.span().end();
                 break;
             }
-            span.end();
+            cx.span().end();
         }
     });
 }

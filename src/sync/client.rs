@@ -23,6 +23,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use opentelemetry::trace::TraceContextExt;
 
 use crate::error::{Error, Result};
 use crate::proto::{
@@ -30,11 +31,7 @@ use crate::proto::{
 };
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::ClientConnection;
-use crate::tracing;
-use opentelemetry::KeyValue;
-use opentelemetry::trace::Tracer;
-use opentelemetry::Context as OtelContext;
-use opentelemetry::trace::TraceContextExt;
+use crate::tracing::start_client_trace;
 
 #[cfg(windows)]
 use super::sys::PipeConnection;
@@ -164,28 +161,7 @@ impl Client {
     pub fn request(&self, req: Request) -> Result<Response> {
         check_oversize(req.compute_size() as usize, false)?;
 
-        let tracer = opentelemetry::global::tracer("ttrpc");
-        let span = tracer.start("rpc.client");
-        let cx = OtelContext::current_with_span(span);
-        
-        let span = cx.span();
-        span.set_attributes(vec![
-            KeyValue::new("rpc.system", "ttrpc"),
-            KeyValue::new("rpc.service", req.service.clone()),
-            KeyValue::new("rpc.method", req.method.clone()),
-        ]);
-        let _guard = cx.clone().attach();
-
-        let mut metadata = std::collections::HashMap::new();
-        tracing::inject_context(&cx, &mut metadata);
-        let mut pb_metadata = Vec::new();
-        for (key, values) in metadata {
-            pb_metadata.push(crate::proto::KeyValue {
-                key: key,
-                value: values.join(","),
-                ..Default::default()
-            });
-        }
+        let (cx, pb_metadata) = start_client_trace("rpc.client", &req.service, &req.method);
         let mut req = req;
         req.set_metadata(pb_metadata);
 
@@ -216,11 +192,11 @@ impl Client {
 
         let status = res.status();
         if status.code() != Code::OK {
-            span.end();
+            cx.span().end();
             return Err(Error::RpcStatus((*status).clone()));
         }
 
-        span.end();
+        cx.span().end();
         Ok(res)
     }
 }
