@@ -1,6 +1,6 @@
-use opentelemetry::{global, KeyValue};
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry::global;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::trace::TracerProvider;
 use std::sync::Arc;
 use std::thread;
 use ttrpc::error::Result;
@@ -14,11 +14,7 @@ mod utils;
 struct HelloService;
 
 impl hello_ttrpc::HelloService for HelloService {
-    fn say_hello(
-        &self,
-        ctx: &::ttrpc::TtrpcContext,
-        req: HelloRequest,
-    ) -> Result<HelloResponse> {
+    fn say_hello(&self, _ctx: &::ttrpc::TtrpcContext, req: HelloRequest) -> Result<HelloResponse> {
         let mut response = HelloResponse::new();
         response.reply = format!("Hello, {}!", req.greeting);
         Ok(response)
@@ -34,7 +30,7 @@ fn main() {
     global::set_tracer_provider(provider.clone());
 
     let hello_service = hello_ttrpc::create_hello_service(Arc::new(HelloService {}));
-    
+
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
     let mut server = Server::new()
         .bind(utils::SOCK_ADDR)
@@ -53,6 +49,8 @@ fn main() {
     });
 
     rx.recv().unwrap();
-    
-    provider.shutdown().expect("TracerProvider should shutdown successfully");
-} 
+
+    provider
+        .shutdown()
+        .expect("TracerProvider should shutdown successfully");
+}

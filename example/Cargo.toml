@@ -24,6 +24,9 @@ tokio = { version = "1.0.1", features = ["signal", "time"] }
 async-trait = "0.1.42"
 rand = "0.8.5"
 
+opentelemetry = { version = "0.27", default-features = false, features = ["trace"] }
+opentelemetry-stdout = "0.27"
+opentelemetry_sdk = { version = "0.27", default-features = false, features = ["trace"] }
 
 [[example]]
 name = "client"
@@ -62,9 +65,4 @@ ttrpc-codegen = { path = "../ttrpc-codegen"}
 
 [patch.crates-io]
 ttrpc-compiler = { path = "../compiler"}
-
-[dependencies]
-opentelemetry = "0.27.1"
-opentelemetry-stdout = "0.27.0"
-opentelemetry_sdk = "0.27.1"
 
