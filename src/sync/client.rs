@@ -30,6 +30,11 @@ use crate::proto::{
 };
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::ClientConnection;
+use crate::tracing;
+use opentelemetry::KeyValue;
+use opentelemetry::trace::Tracer;
+use opentelemetry::Context as OtelContext;
+use opentelemetry::trace::TraceContextExt;
 
 #[cfg(windows)]
 use super::sys::PipeConnection;
@@ -159,6 +164,31 @@ impl Client {
     pub fn request(&self, req: Request) -> Result<Response> {
         check_oversize(req.compute_size() as usize, false)?;
 
+        let tracer = opentelemetry::global::tracer("ttrpc");
+        let span = tracer.start("rpc.client");
+        let cx = OtelContext::current_with_span(span);
+        
+        let span = cx.span();
+        span.set_attributes(vec![
+            KeyValue::new("rpc.system", "ttrpc"),
+            KeyValue::new("rpc.service", req.service.clone()),
+            KeyValue::new("rpc.method", req.method.clone()),
+        ]);
+        let _guard = cx.clone().attach();
+
+        let mut metadata = std::collections::HashMap::new();
+        tracing::inject_context(&cx, &mut metadata);
+        let mut pb_metadata = Vec::new();
+        for (key, values) in metadata {
+            pb_metadata.push(crate::proto::KeyValue {
+                key: key,
+                value: values.join(","),
+                ..Default::default()
+            });
+        }
+        let mut req = req;
+        req.set_metadata(pb_metadata);
+
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
         // Notice: pure client problem can't be rpc error
 
@@ -186,9 +216,11 @@ impl Client {
 
         let status = res.status();
         if status.code() != Code::OK {
+            span.end();
             return Err(Error::RpcStatus((*status).clone()));
         }
 
+        span.end();
         Ok(res)
     }
 }

@@ -54,6 +54,8 @@ mod macros;
 pub mod context;
 
 pub mod proto;
+pub mod tracing;
+
 #[doc(inline)]
 pub use self::proto::{Code, MessageHeader, Request, Response, Status};
 

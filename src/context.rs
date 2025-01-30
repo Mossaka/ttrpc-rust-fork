@@ -4,8 +4,11 @@
 //
 
 use crate::proto::KeyValue;
+use crate::tracing;
 use core::time::Duration;
+use opentelemetry::Context as OtelContext;
 use std::collections::HashMap;
+
 #[derive(Clone, Default, Debug)]
 pub struct Context {
     pub metadata: HashMap<String, Vec<String>>,
@@ -31,6 +34,12 @@ pub fn with_metadata(md: HashMap<String, Vec<String>>) -> Context {
     }
 }
 
+pub fn with_otel_context(otel_ctx: OtelContext) -> Context {
+    let mut ctx = Context::default();
+    tracing::inject_context(&otel_ctx, &mut ctx.metadata);
+    ctx
+}
+
 impl Context {
     // appends additional values to the given key.
     pub fn add(&mut self, key: String, value: String) {
@@ -50,6 +59,14 @@ impl Context {
         } else {
             self.metadata.insert(key.to_lowercase(), value);
         }
+    }
+
+    pub fn extract_otel_context(&self) -> OtelContext {
+        tracing::extract_context(&self.metadata)
+    }
+
+    pub fn inject_otel_context(&mut self, otel_ctx: &OtelContext) {
+        tracing::inject_context(otel_ctx, &mut self.metadata);
     }
 }
 
